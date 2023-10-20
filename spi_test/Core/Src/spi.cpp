@@ -200,6 +200,12 @@
 #include "stm32f4xx_hal.h"
 #include "stm32f4xx_hal_spi.h"
 #include "local.hpp"
+#include "spi.hpp"
+
+#include <iostream>
+#include <map>
+#include <vector>
+#include <iomanip>
 
 /** @addtogroup STM32F4xx_HAL_Driver
   * @{
@@ -218,12 +224,12 @@
 //#define SPI_DEFAULT_TIMEOUT 100U
 //#define SPI_BSY_FLAG_WORKAROUND_TIMEOUT 1000U /*!< Timeout 1000 µs             */
 #define SPI_DEFAULT_TIMEOUT 100U
-#define SPI_BSY_FLAG_WORKAROUND_TIMEOUT 10000U /*!< Timeout 10 ms             */
+#define SPI_BSY_FLAG_WORKAROUND_TIMEOUT 100000U /*!< Timeout 100 ms             */
 /**
   * @}
   */
 
-void printSPIHandle(SPI_HandleTypeDef spiHandle);
+void printSPIHandle(SPI_HandleTypeDef* spiHandle);
 
 void ResetAndReinitializeSPI(SPI_HandleTypeDef *hspi) {
     // Disable the SPI peripheral
@@ -305,7 +311,7 @@ static HAL_StatusTypeDef SPI_EndRxTxTransaction(SPI_HandleTypeDef *hspi, uint32_
 {
   /* Timeout in µs */
   __IO uint32_t count = SPI_BSY_FLAG_WORKAROUND_TIMEOUT * (SystemCoreClock / 24U / 1000000U);
-  uprintf("SPI_EndRxTxTransaction waiting for %d * %d =  %d \n", SPI_BSY_FLAG_WORKAROUND_TIMEOUT, (SystemCoreClock / 24U / 1000000U), count);
+  uprintf("SPI_EndRxTxTransaction waiting for %d * %d =  %d \r\n", SPI_BSY_FLAG_WORKAROUND_TIMEOUT, (SystemCoreClock / 24U / 1000000U), count);
   /* Erratasheet: BSY bit may stay high at the end of a data transfer in Slave mode */
   if (hspi->Init.Mode == SPI_MODE_MASTER)
   {
@@ -333,7 +339,7 @@ static HAL_StatusTypeDef SPI_EndRxTxTransaction(SPI_HandleTypeDef *hspi, uint32_
     } while (__HAL_SPI_GET_FLAG(hspi, SPI_FLAG_BSY) != RESET);
   }
 
-  uprintf("SPI_EndRxTxTransaction OK SPI_FLAG_BSY=0 end count=%d \n", count);
+  uprintf("SPI_EndRxTxTransaction OK SPI_FLAG_BSY=0 end count=%d \r\n", count);
   return HAL_OK;
 }
 
@@ -374,14 +380,14 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
   if (!((tmp_state == HAL_SPI_STATE_READY) || \
         ((tmp_mode == SPI_MODE_MASTER) && (hspi->Init.Direction == SPI_DIRECTION_2LINES) && (tmp_state == HAL_SPI_STATE_BUSY_RX))))
   {
-    uprintf("PAL_SPI_TS: error state not ready:%d\n", tmp_state);
+    uprintf("PAL_SPI_TS: error state not ready:%d\r\n", tmp_state);
     errorcode = HAL_BUSY;
     goto error;
   }
 
   if ((pTxData == NULL) || (pRxData == NULL) || (Size == 0U))
   {
-    uprintf("PAL_SPI_TS: pTxData = pRxData = NULL:%d\n");
+    uprintf("PAL_SPI_TS: pTxData = pRxData = NULL:%d\r\n");
     errorcode = HAL_ERROR;
     goto error;
   }
@@ -405,6 +411,9 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
   hspi->RxISR       = NULL;
   hspi->TxISR       = NULL;
 
+  //printSPIHandle(hspi);
+  uprintf("PAL_SPI_TS: TxXferCount =%d buffer: %02X\r\n", hspi->TxXferCount, (*hspi->pTxBuffPtr));
+  uprintf("PAL_SPI_TS: TxXferCount =%d buffer: %02X\r\n", Size, (uint8_t *) pTxData);
 
   /* Check if the SPI is already enabled */
   if ((hspi->Instance->CR1 & SPI_CR1_SPE) != SPI_CR1_SPE)
@@ -419,7 +428,7 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
       *((__IO uint8_t *)&hspi->Instance->DR) = (*hspi->pTxBuffPtr);
       hspi->pTxBuffPtr += sizeof(uint8_t);
       hspi->TxXferCount--;
-      uprintf("PAL_SPI_TS: TxXferCount =:%d\n", hspi->TxXferCount);
+      uprintf("PAL_SPI_TS: initial load TxXferCount=%d RxXferCount=%d txd=%02X rxd=%02X\r\n", hspi->TxXferCount, hspi->RxXferCount, (*hspi->pTxBuffPtr), (*hspi->pRxBuffPtr));
     }
     while ((hspi->TxXferCount > 0U) || (hspi->RxXferCount > 0U))
     {
@@ -427,11 +436,12 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
       if ((__HAL_SPI_GET_FLAG(hspi, SPI_FLAG_TXE)) && (hspi->TxXferCount > 0U) && (txallowed == 1U))
       {
         *(__IO uint8_t *)&hspi->Instance->DR = (*hspi->pTxBuffPtr);
+        uint8_t txd = (*hspi->pTxBuffPtr);
         hspi->pTxBuffPtr++;
         hspi->TxXferCount--;
         /* Next Data is a reception (Rx). Tx not allowed */
         txallowed = 0U;
-        uprintf("PAL_SPI_TS: SPI_FLAG_TXE TxXferCount =:%d txallowed=%d\n", hspi->TxXferCount, txallowed);
+      uprintf("PAL_SPI_TS: SPI_FLAG_TXE so send txd=%02X and next is rx TxXferCount=%d RxXferCount=%d txd=%02X rxd=%02X\r\n", txd, hspi->TxXferCount, hspi->RxXferCount, (*hspi->pTxBuffPtr), (*hspi->pRxBuffPtr));
 
       }
 
@@ -439,16 +449,17 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
       if ((__HAL_SPI_GET_FLAG(hspi, SPI_FLAG_RXNE)) && (hspi->RxXferCount > 0U))
       {
         (*(uint8_t *)hspi->pRxBuffPtr) = hspi->Instance->DR;
+        uint8_t rxd = (*hspi->pRxBuffPtr);
         hspi->pRxBuffPtr++;
         hspi->RxXferCount--;
         /* Next Data is a Transmission (Tx). Tx is allowed */
         txallowed = 1U;
-        uprintf("PAL_SPI_TS: SPI_FLAG_RXNE RxXferCount =%d txallowed=%d\n", hspi->RxXferCount, txallowed);
+      uprintf("PAL_SPI_TS: SPI_FLAG_RXNE so got rxd=%02X and next tx TxXferCount=%d RxXferCount=%d txd=%02X rxd=%02X\r\n", rxd, hspi->TxXferCount, hspi->RxXferCount, (*hspi->pTxBuffPtr), (*hspi->pRxBuffPtr));
       }
       if ((((HAL_GetTick() - tickstart) >=  Timeout) && ((Timeout != HAL_MAX_DELAY))) || (Timeout == 0U))
       {
         errorcode = HAL_TIMEOUT;
-        uprintf("PAL_SPI_TS: ERROR TIMEOUT\n");
+        uprintf("PAL_SPI_TS: ERROR TIMEOUT\r\n");
         goto error;
       }
     }
@@ -457,13 +468,15 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
 
   // TODO: skip check end of transaction
   /* Check the end of the transaction */
+/*
   if (SPI_EndRxTxTransaction(hspi, Timeout, tickstart) != HAL_OK)
   {
     errorcode = HAL_ERROR;
     hspi->ErrorCode = HAL_SPI_ERROR_FLAG;
-    uprintf("PAL_SPI_TS: ERROR SPI_EndRxTxTransaction not ok\n");
+    uprintf("PAL_SPI_TS: ERROR SPI_EndRxTxTransaction not ok\r\n");
     goto error;
   }
+  */
 
   /* Clear overrun flag in 2 Lines communication mode because received is not read */
   if (hspi->Init.Direction == SPI_DIRECTION_2LINES)
@@ -480,53 +493,50 @@ error :
 }
 
 
-// Function to print the values of SPI_InitTypeDef
-void printSPIConfig(SPI_InitTypeDef spiConfig) {
-  printf("BaudRatePrescaler: %u\n", spiConfig.BaudRatePrescaler);
-  printf("CLKPhase: %u\n", spiConfig.CLKPhase);
-  printf("CLKPolarity: %u\n", spiConfig.CLKPolarity);
-  printf("CRCCalculation: %u\n", spiConfig.CRCCalculation);
-  printf("CRCPolynomial: %u\n", spiConfig.CRCPolynomial);
-  printf("DataSize: %u\n", spiConfig.DataSize);
-  printf("Direction: %u\n", spiConfig.Direction);
-  printf("FirstBit: %u\n", spiConfig.FirstBit);
-  printf("Mode: %u\n", spiConfig.Mode);
-  printf("NSS: %u\n", spiConfig.NSS);
-  printf("TIMode: %u\n", spiConfig.TIMode);
-}
 
 void printSPIStateDescription(HAL_SPI_StateTypeDef state) {
   switch (state) {
     case HAL_SPI_STATE_RESET:
-      printf("SPI State: RESET\n");
+      uprintf("		SPI State: RESET\r\n");
+      break;
     case HAL_SPI_STATE_READY:
-      printf("SPI State: READY\n");
+      uprintf("		SPI State: READY\r\n");
+      break;
     case HAL_SPI_STATE_BUSY:
-      printf("SPI State: BUSY\n");
+      uprintf("		SPI State: BUSY\r\n");
+      break;
     case HAL_SPI_STATE_BUSY_TX:
-      printf("SPI State: BUSY_TX\n");
+      uprintf("		SPI State: BUSY_TX\r\n");
+      break;
     case HAL_SPI_STATE_BUSY_RX:
-      printf("SPI State: BUSY_RX\n");
+      uprintf("		SPI State: BUSY_RX\r\n");
+      break;
     case HAL_SPI_STATE_BUSY_TX_RX:
-      printf("SPI State: BUSY_TX_RX\n");
+      uprintf("		SPI State: BUSY_TX_RX\r\n");
+      break;
     case HAL_SPI_STATE_ERROR:
-      printf("SPI State: ERROR\n");
+      uprintf("		SPI State: ERROR\r\n");
+      break;
     case HAL_SPI_STATE_ABORT:
-      printf("SPI State: ABORT\n");
+      uprintf("		SPI State: ABORT\r\n");
+      break;
+    default:
+      uprintf("		SPI State: unknown\r\n");
+      break;
   }
 }
 
 // Function to print the values of SPI_TypeDef in hexadecimal format
 void printSPIValuesHex(SPI_TypeDef spi) {
-  printf("CR1: 0x%08X\n", spi.CR1);
-  printf("CR2: 0x%08X\n", spi.CR2);
-  printf("SR: 0x%08X\n", spi.SR);
-  printf("DR: 0x%08X\n", spi.DR);
-  printf("CRCPR: 0x%08X\n", spi.CRCPR);
-  printf("RXCRCR: 0x%08X\n", spi.RXCRCR);
-  printf("TXCRCR: 0x%08X\n", spi.TXCRCR);
-  printf("I2SCFGR: 0x%08X\n", spi.I2SCFGR);
-  printf("I2SPR: 0x%08X\n", spi.I2SPR);
+  uprintf("	CR1:     0x%08X\r\n", spi.CR1);
+  uprintf("	CR2:     0x%08X\r\n", spi.CR2);
+  uprintf("	SR:      0x%08X\r\n", spi.SR);
+  //uprintf("	DR:      0x%08X\r\n", spi.DR);
+  uprintf("	CRCPR:   0x%08X\r\n", spi.CRCPR);
+  uprintf("	RXCRCR:  0x%08X\r\n", spi.RXCRCR);
+  uprintf("	TXCRCR:  0x%08X\r\n", spi.TXCRCR);
+  uprintf("	I2SCFGR: 0x%08X\r\n", spi.I2SCFGR);
+  uprintf("	I2SPR:   0x%08X\r\n", spi.I2SPR);
 }
 
 // Function to get a string description for HAL_SPI_Error
@@ -553,27 +563,114 @@ const char* getSPIErrorDescription(uint32_t errorCode) {
   }
 }
 
+// spi init printing...loads of boilerplate (sigh)
+
+// spi init field names
+// see Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_spi.h
+// warning: variable definitions in header files can lead to ODR violation...
+std::map<std::string, std::vector<std::string>> spiFieldMap = {
+      {"Mode", {"SPI_MODE_SLAVE", "SPI_MODE_MASTER"}},
+      {"Direction", {"SPI_DIRECTION_2LINES", "SPI_DIRECTION_2LINES_RXONLY", "SPI_DIRECTION_1LINE"}},
+      {"DataSize", {"SPI_DATASIZE_8BIT", "SPI_DATASIZE_16BIT"}},
+      {"CLKPolarity", {"SPI_POLARITY_LOW", "SPI_POLARITY_HIGH"}},
+      {"CLKPhase", {"SPI_PHASE_1EDGE", "SPI_PHASE_2EDGE"}},
+      {"NSS", {"SPI_NSS_SOFT", "SPI_NSS_HARD_INPUT", "SPI_NSS_HARD_OUTPUT"}},
+      {"BaudRatePrescaler", {"SPI_BAUDRATEPRESCALER_2", "SPI_BAUDRATEPRESCALER_4", "SPI_BAUDRATEPRESCALER_8", "SPI_BAUDRATEPRESCALER_16", "SPI_BAUDRATEPRESCALER_32", "SPI_BAUDRATEPRESCALER_64", "SPI_BAUDRATEPRESCALER_128", "SPI_BAUDRATEPRESCALER_256"}},
+      {"FirstBit", {"SPI_FIRSTBIT_MSB", "SPI_FIRSTBIT_LSB"}},
+      {"TIMode", {"SPI_TIMODE_DISABLE", "SPI_TIMODE_ENABLE"}},
+      {"CRCCalculation", {"SPI_CRCCALCULATION_DISABLE", "SPI_CRCCALCULATION_ENABLE"}
+   }
+};
+
+std::map<std::string, uint32_t> spiFieldElementMap = {
+  {"SPI_MODE_SLAVE",                    SPI_MODE_SLAVE},
+  {"SPI_MODE_MASTER",                   SPI_MODE_MASTER},
+                                                                      
+  {"SPI_DIRECTION_2LINES",              SPI_DIRECTION_2LINES},
+  {"SPI_DIRECTION_2LINES_RXONLY",       SPI_DIRECTION_2LINES_RXONLY},
+  {"SPI_DIRECTION_1LINE",               SPI_DIRECTION_1LINE},
+                                                                      
+  {"SPI_DATASIZE_8BIT",                 SPI_DATASIZE_8BIT},
+  {"SPI_DATASIZE_16BIT",                SPI_DATASIZE_16BIT},
+                                                                      
+  {"SPI_POLARITY_LOW",                  SPI_POLARITY_LOW},
+  {"SPI_POLARITY_HIGH",                 SPI_POLARITY_HIGH},
+                                                                      
+  {"SPI_PHASE_1EDGE",                   SPI_PHASE_1EDGE},
+  {"SPI_PHASE_2EDGE",                   SPI_PHASE_2EDGE},
+                                                                      
+  {"SPI_NSS_SOFT",                      SPI_NSS_SOFT},
+  {"SPI_NSS_HARD_INPUT",                SPI_NSS_HARD_INPUT},
+  {"SPI_NSS_HARD_OUTPUT",               SPI_NSS_HARD_OUTPUT},
+                                                                      
+  {"SPI_BAUDRATEPRESCALER_2",           SPI_BAUDRATEPRESCALER_2},
+  {"SPI_BAUDRATEPRESCALER_4",           SPI_BAUDRATEPRESCALER_4},
+  {"SPI_BAUDRATEPRESCALER_8",           SPI_BAUDRATEPRESCALER_8},
+  {"SPI_BAUDRATEPRESCALER_16",          SPI_BAUDRATEPRESCALER_16},
+  {"SPI_BAUDRATEPRESCALER_32",          SPI_BAUDRATEPRESCALER_32},
+  {"SPI_BAUDRATEPRESCALER_64",          SPI_BAUDRATEPRESCALER_64},
+  {"SPI_BAUDRATEPRESCALER_128",         SPI_BAUDRATEPRESCALER_128},
+  {"SPI_BAUDRATEPRESCALER_256",         SPI_BAUDRATEPRESCALER_256},
+                                                                      
+                                                                      
+  {"SPI_FIRSTBIT_MSB",                  SPI_FIRSTBIT_MSB},
+  {"SPI_FIRSTBIT_LSB",                  SPI_FIRSTBIT_LSB},
+                                                                      
+  {"SPI_TIMODE_DISABLE",                SPI_TIMODE_DISABLE},
+  {"SPI_TIMODE_ENABLE",                 SPI_TIMODE_ENABLE},
+                                                                      
+  {"SPI_CRCCALCULATION_DISABLE",        SPI_CRCCALCULATION_DISABLE},
+  {"SPI_CRCCALCULATION_ENABLE",         SPI_CRCCALCULATION_ENABLE},
+};
+
+
+void printInitHelper(uint8_t fieldValue, std::string fieldName) {
+
+  for (auto pound_defines : spiFieldMap[fieldName]) {
+    if (spiFieldElementMap[pound_defines] == fieldValue) {
+      std::cout << "  " << std::setw(20) << std::left << fieldName << " : " << pound_defines << "\n";
+      return;
+    }
+  }
+
+  std::cout << "  " << std::setw(20) << std::left << fieldName << " : " << "unknown" << "\n";
+
+}
+
+void printSPIInitTypeDef(SPI_InitTypeDef &spiInit) {
+  std::cout << " spiHandle->Init: \n";
+  printInitHelper(spiInit.Mode,             "Mode");
+  printInitHelper(spiInit.Direction,        "Direction");
+  printInitHelper(spiInit.DataSize,         "DataSize");
+  printInitHelper(spiInit.CLKPolarity,      "CLKPolarity");
+  printInitHelper(spiInit.CLKPhase,         "CLKPhase");
+  printInitHelper(spiInit.NSS,              "NSS");
+  printInitHelper(spiInit.BaudRatePrescaler,"BaudRatePrescaler");
+  printInitHelper(spiInit.FirstBit,         "FirstBit");
+  printInitHelper(spiInit.TIMode,           "TIMode");
+  printInitHelper(spiInit.CRCCalculation,   "CRCCalculation");
+  std::cout << "  " << std::setw(20) << std::left << "CRCPolynomial" << " : " << spiInit.CRCPolynomial << "\n";
+}
 
 // Function to print the values of SPI_HandleTypeDef including nested structures
-void printSPIHandle(SPI_HandleTypeDef spiHandle) {
-  printf("SPI Handle:\n");
-  printf("Instance: %p\n", (void*)spiHandle.Instance);
-  printSPIValuesHex(* (spiHandle.Instance));
+void printSPIHandle(SPI_HandleTypeDef* spiHandle) {
+  uprintf(" SPI Handle:\r\n");
+  uprintf(" Instance: %p\r\n", (void*)spiHandle->Instance);
+  printSPIValuesHex(* (spiHandle->Instance));
 
-  printf("SPI_InitTypeDef:\n");
-  printSPIConfig(spiHandle.Init);
+  uprintf(" SPI_InitTypeDef:\r\n");
+  printSPIInitTypeDef(spiHandle->Init);
 
-  printf("pTxBuffPtr: %p\n", (void*)spiHandle.pTxBuffPtr);
-  printf("TxXferSize: %u\n", spiHandle.TxXferSize);
-  printf("TxXferCount: %u\n", spiHandle.TxXferCount);
+  uprintf(" pTxBuffPtr: %p ", (void*)spiHandle->pTxBuffPtr);
+  uprintf(" TxXferSize: %u ", spiHandle->TxXferSize);
+  uprintf(" TxXferCount: %u\r\n", spiHandle->TxXferCount);
 
-  printf("pRxBuffPtr: %p\n", (void*)spiHandle.pRxBuffPtr);
-  printf("RxXferSize: %u\n", spiHandle.RxXferSize);
-  printf("RxXferCount: %u\n", spiHandle.RxXferCount);
+  uprintf(" pRxBuffPtr: %p ", (void*)spiHandle->pRxBuffPtr);
+  uprintf(" RxXferSize: %u ", spiHandle->RxXferSize);
+  uprintf(" RxXferCount: %u\r\n", spiHandle->RxXferCount);
 
-  printf("State: \n"); 
-  printSPIStateDescription(spiHandle.State);
-  printf("ErrorCode: 0x%08X\n", spiHandle.ErrorCode);
-  printf("ErrorCode: %s\n", getSPIErrorDescription(spiHandle.ErrorCode));
+  uprintf(" State: \r\n"); 
+  printSPIStateDescription(spiHandle->State);
+  uprintf("ErrorCode: 0x%08X : %s\r\n", spiHandle->ErrorCode,getSPIErrorDescription(spiHandle->ErrorCode));
 }
 

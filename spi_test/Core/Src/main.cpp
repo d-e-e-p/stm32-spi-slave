@@ -107,13 +107,17 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint8_t tx {};
-  uint8_t rx {};
-  for (int i=0; i < 10; i++) {
-    uprintf("slave start %d: tx=%d rx=%d\r\n", i, tx, rx);
+  uint8_t tx = 0xAA;
+  uint8_t rx = 0xBB;
+  uprintf("\r\n");
+  HAL_Delay(1000);
+  for (int i=3; i==0; i--) {
+    uprintf("slave start %d\r\n", i);
     HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin); // green
     HAL_Delay(1000);
   }
+  uprintf("\r\n\r\n\r\n\r\n");
+  HAL_Delay(1000);
                                               
   while (1)
   {
