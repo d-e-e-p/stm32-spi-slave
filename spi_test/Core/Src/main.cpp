@@ -109,15 +109,15 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   uint8_t tx = 0xAA;
   uint8_t rx = 0xBB;
-  uprintf("\r\n");
-  HAL_Delay(1000);
-  for (int i=3; i==0; i--) {
+  //uprintf("\r\n"); HAL_Delay(1000);
+  for (int i=10; i<0; i--) {
     uprintf("slave start %d\r\n", i);
     HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin); // green
     HAL_Delay(1000);
   }
-  uprintf("\r\n\r\n\r\n\r\n");
-  HAL_Delay(1000);
+  uprintf("\r\n"); HAL_Delay(1000);
+  uprintf("\r\n"); HAL_Delay(1000);
+  uprintf("\r\n"); HAL_Delay(1000);
                                               
   while (1)
   {
@@ -126,8 +126,8 @@ int main(void)
       //HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin); // green
       //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6);
       //HAL_Delay(1000);
-      PAL_SPI_TransmitReceive(&hspi1, &tx, &rx, 1, HAL_MAX_DELAY);
-      uprintf("slave: tx=%d rx=%d\r\n", tx, rx);
+      PAL_SPI_TransmitReceive(&hspi3, &tx, &rx, 1, HAL_MAX_DELAY);
+      uprintf("slave: tx=%d rx=%d -----------------------------------------------------------\r\n", tx, rx);
       HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin); // green
       tx = rx;
   }

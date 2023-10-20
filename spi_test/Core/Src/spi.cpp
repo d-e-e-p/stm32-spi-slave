@@ -387,7 +387,7 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
 
   if ((pTxData == NULL) || (pRxData == NULL) || (Size == 0U))
   {
-    uprintf("PAL_SPI_TS: pTxData = pRxData = NULL:%d\r\n");
+    uprintf("PAL_SPI_TS: error pTxData = pRxData = NULL:%d\r\n");
     errorcode = HAL_ERROR;
     goto error;
   }
@@ -412,8 +412,7 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
   hspi->TxISR       = NULL;
 
   //printSPIHandle(hspi);
-  uprintf("PAL_SPI_TS: TxXferCount =%d buffer: %02X\r\n", hspi->TxXferCount, (*hspi->pTxBuffPtr));
-  uprintf("PAL_SPI_TS: TxXferCount =%d buffer: %02X\r\n", Size, (uint8_t *) pTxData);
+  uprintf("PAL_SPI_TS: Init TxXferCount=%d RxXferCount=%d txd=%02X rxd=%02X\r\n", hspi->TxXferCount, hspi->RxXferCount, (*hspi->pTxBuffPtr), (*hspi->pRxBuffPtr));
 
   /* Check if the SPI is already enabled */
   if ((hspi->Instance->CR1 & SPI_CR1_SPE) != SPI_CR1_SPE)
@@ -423,13 +422,19 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
   }
 
   {
+    // preload DR with outgoing value
     if ((hspi->Init.Mode == SPI_MODE_SLAVE) || (initial_TxXferCount == 0x01U))
     {
+      uprintf("PAL_SPI_TS: initial_TxXferCount = 0x01U \r\n");
       *((__IO uint8_t *)&hspi->Instance->DR) = (*hspi->pTxBuffPtr);
+      uint8_t txd = (*hspi->pTxBuffPtr);
       hspi->pTxBuffPtr += sizeof(uint8_t);
       hspi->TxXferCount--;
-      uprintf("PAL_SPI_TS: initial load TxXferCount=%d RxXferCount=%d txd=%02X rxd=%02X\r\n", hspi->TxXferCount, hspi->RxXferCount, (*hspi->pTxBuffPtr), (*hspi->pRxBuffPtr));
+      uprintf("PAL_SPI_TS: Initial Load txd=%02X and next is txrx TxXferCount=%d RxXferCount=%d txd=%02X rxd=%02X\r\n", txd, hspi->TxXferCount, hspi->RxXferCount, (*hspi->pTxBuffPtr), (*hspi->pRxBuffPtr));
     }
+
+
+    uprintf("PAL_SPI_TS: check if TxXferCount=%d>0 RxXferCount=%d>0 SPI_FLAG_TXE=%d SPI_FLAG_RXNE=%d \r\n", hspi->TxXferCount, hspi->RxXferCount, __HAL_SPI_GET_FLAG(hspi, SPI_FLAG_TXE), __HAL_SPI_GET_FLAG(hspi, SPI_FLAG_RXNE));
     while ((hspi->TxXferCount > 0U) || (hspi->RxXferCount > 0U))
     {
       /* Check TXE flag */
@@ -445,6 +450,13 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
 
       }
 
+      while(true) {
+        if (__HAL_SPI_GET_FLAG(hspi, SPI_FLAG_RXNE)) {
+          uprintf("PAL_SPI_TS: SPI_FLAG_RXNE=%d rxd=%02X \r\n", __HAL_SPI_GET_FLAG(hspi, SPI_FLAG_RXNE), hspi->Instance->DR);
+          HAL_Delay(1);
+        }
+      }
+
       /* Wait until RXNE flag is reset */
       if ((__HAL_SPI_GET_FLAG(hspi, SPI_FLAG_RXNE)) && (hspi->RxXferCount > 0U))
       {
@@ -454,7 +466,7 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
         hspi->RxXferCount--;
         /* Next Data is a Transmission (Tx). Tx is allowed */
         txallowed = 1U;
-      uprintf("PAL_SPI_TS: SPI_FLAG_RXNE so got rxd=%02X and next tx TxXferCount=%d RxXferCount=%d txd=%02X rxd=%02X\r\n", rxd, hspi->TxXferCount, hspi->RxXferCount, (*hspi->pTxBuffPtr), (*hspi->pRxBuffPtr));
+        uprintf("PAL_SPI_TS: SPI_FLAG_RXNE so got rxd=%02X \r\n", rxd);
       }
       if ((((HAL_GetTick() - tickstart) >=  Timeout) && ((Timeout != HAL_MAX_DELAY))) || (Timeout == 0U))
       {
@@ -463,7 +475,7 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
         goto error;
       }
     }
-  }
+ }
 
 
   // TODO: skip check end of transaction
