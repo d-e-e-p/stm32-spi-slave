@@ -202,6 +202,7 @@
 #include "local.hpp"
 #include "spi.hpp"
 
+#include <string>
 #include <iostream>
 #include <map>
 #include <vector>
@@ -246,7 +247,25 @@ void ResetAndReinitializeSPI(SPI_HandleTypeDef *hspi) {
     // SPI_Init();
 }
 
+void printBits(uint16_t value) {
+    for (int i = 15; i >= 0; --i) {
+        std::cout << ((value >> i) & 1);
+        if (i % 4 == 0)
+            std::cout << ' ';
+    }
+    std::cout << std::endl;
+}
 
+
+std::string getBitString(uint16_t value) {
+    std::string bitString;
+    for (int i = 7; i >= 0; --i) {
+        bitString += ((value >> i) & 1) ? '1' : '0';
+        if (i % 4 == 0)
+            bitString += ' ';
+    }
+    return bitString;
+}
 
 static HAL_StatusTypeDef SPI_WaitFlagStateUntilTimeout(SPI_HandleTypeDef *hspi, uint32_t Flag, FlagStatus State,
                                                        uint32_t Timeout, uint32_t Tickstart)
@@ -343,6 +362,43 @@ static HAL_StatusTypeDef SPI_EndRxTxTransaction(SPI_HandleTypeDef *hspi, uint32_
   return HAL_OK;
 }
 
+void gpio_led(uint32_t pin, bool value) {
+  if (value) {
+    HAL_GPIO_WritePin(GPIOD, pin, GPIO_PIN_SET);
+  } else {
+    HAL_GPIO_WritePin(GPIOD, pin, GPIO_PIN_RESET);
+  }
+}
+
+void forever_debug_loop(SPI_HandleTypeDef *hspi) {
+
+    uint32_t led_orange GPIO_PIN_13 ;
+    uint32_t led_green  GPIO_PIN_12 ;
+    uint32_t led_red    GPIO_PIN_14 ;
+    uint32_t led_blue   GPIO_PIN_15 ;
+     
+    uprintf("starting forever_debug_loop\r\n");
+    while(true) {
+        uint32_t spiFlags = hspi->Instance->SR;
+        bool is_busy = spiFlags & SPI_FLAG_BSY;
+        bool is_overrun = spiFlags & SPI_FLAG_OVR;
+        bool is_rx_buffer_ready = (spiFlags & SPI_FLAG_RXNE);
+        bool is_tx_buffer_ready = ! (spiFlags & SPI_FLAG_TXE);
+      
+        gpio_led(led_orange, is_busy); 
+        gpio_led(led_red,    is_overrun); 
+        gpio_led(led_green,  is_rx_buffer_ready); 
+        gpio_led(led_blue,   is_tx_buffer_ready); 
+
+        volatile  uint8_t rxd = hspi->Instance->DR;
+        //UNUSED(rxd);
+        if (is_rx_buffer_ready) {
+          uprintf("PAL_SPI_TS: is_busy=%d is_overrun=%d  rxd=%02X [%s]\r\n", is_busy, is_overrun, rxd, getBitString(rxd).c_str());
+          //HAL_Delay(1);
+        }
+   }
+
+}
 
 /* Private macros ------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
@@ -363,6 +419,7 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
   HAL_StatusTypeDef    errorcode = HAL_OK;
 
   /* Check Direction parameter */
+  // temp disable
   assert_param(IS_SPI_DIRECTION_2LINES(hspi->Init.Direction));
 
   /* Process Locked */
@@ -421,6 +478,7 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
     __HAL_SPI_ENABLE(hspi);
   }
 
+
   {
     // preload DR with outgoing value
     if ((hspi->Init.Mode == SPI_MODE_SLAVE) || (initial_TxXferCount == 0x01U))
@@ -433,8 +491,9 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
       uprintf("PAL_SPI_TS: Initial Load txd=%02X and next is txrx TxXferCount=%d RxXferCount=%d txd=%02X rxd=%02X\r\n", txd, hspi->TxXferCount, hspi->RxXferCount, (*hspi->pTxBuffPtr), (*hspi->pRxBuffPtr));
     }
 
+  forever_debug_loop(hspi);
 
-    uprintf("PAL_SPI_TS: check if TxXferCount=%d>0 RxXferCount=%d>0 SPI_FLAG_TXE=%d SPI_FLAG_RXNE=%d \r\n", hspi->TxXferCount, hspi->RxXferCount, __HAL_SPI_GET_FLAG(hspi, SPI_FLAG_TXE), __HAL_SPI_GET_FLAG(hspi, SPI_FLAG_RXNE));
+    uprintf("PAL_SPI_TS: check if (TxXferCount=%d>0 or RxXferCount=%d>0) SPI_FLAG_TXE=%d SPI_FLAG_RXNE=%d \r\n", hspi->TxXferCount, hspi->RxXferCount, __HAL_SPI_GET_FLAG(hspi, SPI_FLAG_TXE), __HAL_SPI_GET_FLAG(hspi, SPI_FLAG_RXNE));
     while ((hspi->TxXferCount > 0U) || (hspi->RxXferCount > 0U))
     {
       /* Check TXE flag */
@@ -446,15 +505,8 @@ HAL_StatusTypeDef PAL_SPI_TransmitReceive(SPI_HandleTypeDef *hspi, uint8_t *pTxD
         hspi->TxXferCount--;
         /* Next Data is a reception (Rx). Tx not allowed */
         txallowed = 0U;
-      uprintf("PAL_SPI_TS: SPI_FLAG_TXE so send txd=%02X and next is rx TxXferCount=%d RxXferCount=%d txd=%02X rxd=%02X\r\n", txd, hspi->TxXferCount, hspi->RxXferCount, (*hspi->pTxBuffPtr), (*hspi->pRxBuffPtr));
+      uprintf("PAL_SPI_TS: SPI_FLAG_TXE send txd=%02X and next is rx TxXferCount=%d RxXferCount=%d txd=%02X rxd=%02X\r\n", txd, hspi->TxXferCount, hspi->RxXferCount, (*hspi->pTxBuffPtr), (*hspi->pRxBuffPtr));
 
-      }
-
-      while(true) {
-        if (__HAL_SPI_GET_FLAG(hspi, SPI_FLAG_RXNE)) {
-          uprintf("PAL_SPI_TS: SPI_FLAG_RXNE=%d rxd=%02X \r\n", __HAL_SPI_GET_FLAG(hspi, SPI_FLAG_RXNE), hspi->Instance->DR);
-          HAL_Delay(1);
-        }
       }
 
       /* Wait until RXNE flag is reset */
